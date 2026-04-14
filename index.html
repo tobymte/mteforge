@@ -363,4 +363,1603 @@
                 const result = await response.json();
                 const data = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
                 
-                if (data.
+                if (data.found === false) {
+                    setApiLog(`Search failed: Manufacturer profile for "${query}" not found.`);
+                    return;
+                }
+
+                const parsedData = {
+                  burnRateMod: data.burn_rate_mod || data.burnRateMod,
+                  grainShape: data.grain_shape || data.grainShape,
+                  heatOfExplosion: data.heat_of_explosion || data.heatOfExplosion,
+                  gamma: data.gamma,
+                  bulkDensity: data.bulk_density_g_cc || data.bulkDensity
+                };
+
+                apiCache.powder[query] = parsedData; 
+
+                setInputs(prev => ({ 
+                  ...prev, 
+                  powderName: query,
+                  burnRateMod: safeFloat(parsedData.burnRateMod, prev.burnRateMod), 
+                  powderType: parsedData.grainShape || prev.powderType,
+                  heatOfExplosion: safeFloat(parsedData.heatOfExplosion, prev.heatOfExplosion),
+                  gamma: safeFloat(parsedData.gamma, prev.gamma),
+                  powderDensity: safeFloat(parsedData.bulkDensity, prev.powderDensity)
+                }));
+                
+                setApiLog(`Success: Fetched ${query} (Source: ${data.manufacturer_source || 'Manufacturer Web'}).`);
+                setExpandedSections(prev => ({...prev, api: false, mfgProfile: true, propellant: true}));
+              } catch (err) {
+                if (retries < 3) {
+                  await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+                  return fetchWithRetry(retries + 1);
+                }
+                setApiLog("API Timeout. Verify connectivity.");
+              }
+            };
+            await fetchWithRetry();
+            setIsFetching(false);
+          };
+
+          const fetchCartridgeData = async (query) => {
+            if (!query) return;
+
+            if (apiCache.cartridge[query]) {
+               const data = apiCache.cartridge[query];
+               setInputs(prev => ({ ...prev, brassCaliber: query, maxPressure: safeFloat(data.maxPressure, prev.maxPressure), pressureStandard: data.standard || prev.pressureStandard, cartridgeType: data.cartridgeType || prev.cartridgeType, caseVolume: safeFloat(data.caseVolume, prev.caseVolume), caseLength: safeFloat(data.caseLength, prev.caseLength), coal: safeFloat(data.coal, prev.coal), bulletCaliber: safeFloat(data.bulletCaliber, prev.bulletCaliber), neckDiameter: safeFloat(data.neckDiameter, prev.neckDiameter), baseDiameter: safeFloat(data.baseDiameter, prev.baseDiameter), shoulderAngle: safeFloat(data.shoulderAngle, prev.shoulderAngle), headspace: safeFloat(data.headspace, prev.headspace), freebore: safeFloat(data.freebore, prev.freebore) }));
+               setApiLog(`Loaded ${query} from memory cache.`);
+               setExpandedSections(prev => ({...prev, chamber: true}));
+               return;
+            }
+
+            setIsFetching(true);
+            setApiLog(`Querying global standards for ${query}...`);
+            
+            const systemPrompt = `Return cartridge specs for ${query} in JSON: { "max_pressure_psi": integer, "standard": "SAAMI"|"CIP", "cartridge_type": "Bottleneck"|"Straight", "case_capacity_h2o": float, "case_length_inches": float, "coal_inches": float, "bullet_diameter_inches": float, "neck_diameter_inches": float, "base_diameter_inches": float, "shoulder_angle_degrees": float, "headspace_inches": float, "freebore_inches": float }`;
+            const userQuery = `Chamber pressure, case capacity, and exact SAAMI chamber reamer dimensions for ${query}`;
+
+            const fetchWithRetry = async (retries = 0) => {
+              try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: { responseMimeType: "application/json" }
+                  })
+                });
+                if (!response.ok) throw new Error('API request failed');
+                const result = await response.json();
+                const data = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+                
+                const parsedData = {
+                  maxPressure: data.max_pressure_psi || data.maxPressure,
+                  standard: data.standard,
+                  cartridgeType: data.cartridge_type || data.cartridgeType,
+                  caseVolume: data.case_capacity_h2o || data.caseVolume,
+                  caseLength: data.case_length_inches || data.caseLength,
+                  coal: data.coal_inches || data.coal,
+                  bulletCaliber: data.bullet_diameter_inches || data.bulletCaliber || data.caliber,
+                  neckDiameter: data.neck_diameter_inches || data.neckDiameter,
+                  baseDiameter: data.base_diameter_inches || data.baseDiameter,
+                  shoulderAngle: data.shoulder_angle_degrees || data.shoulderAngle,
+                  headspace: data.headspace_inches || data.headspace,
+                  freebore: data.freebore_inches || data.freebore
+                };
+
+                apiCache.cartridge[query] = parsedData;
+
+                setInputs(prev => ({ 
+                  ...prev, 
+                  brassCaliber: query,
+                  maxPressure: safeFloat(parsedData.maxPressure, prev.maxPressure), 
+                  pressureStandard: parsedData.standard || prev.pressureStandard,
+                  cartridgeType: parsedData.cartridgeType || prev.cartridgeType,
+                  caseVolume: safeFloat(parsedData.caseVolume, prev.caseVolume),
+                  caseLength: safeFloat(parsedData.caseLength, prev.caseLength),
+                  coal: safeFloat(parsedData.coal, prev.coal),
+                  bulletCaliber: safeFloat(parsedData.bulletCaliber, prev.bulletCaliber),
+                  neckDiameter: safeFloat(parsedData.neckDiameter, prev.neckDiameter),
+                  baseDiameter: safeFloat(parsedData.baseDiameter, prev.baseDiameter),
+                  shoulderAngle: safeFloat(parsedData.shoulderAngle, prev.shoulderAngle),
+                  headspace: safeFloat(parsedData.headspace, prev.headspace),
+                  freebore: safeFloat(parsedData.freebore, prev.freebore)
+                }));
+                
+                setApiLog(`Success: Loaded ${query} pressure standards and geometry.`);
+                setExpandedSections(prev => ({...prev, chamber: true}));
+              } catch (err) {
+                if (retries < 3) {
+                  await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+                  return fetchWithRetry(retries + 1);
+                }
+                setApiLog("API Timeout. Verify connectivity.");
+              }
+            };
+            await fetchWithRetry();
+            setIsFetching(false);
+          };
+
+          const fetchRadarData = async (bulletQuery) => {
+            if (!bulletQuery) return;
+            setIsFetching(true);
+            setRadarError(null); 
+            setApiLog(`Connecting to Manufacturer Database for ${bulletQuery}...`);
+            
+            const systemPrompt = `You are a high-end ballistics data aggregator. Retrieve the EXACT published physical dimensions and ballistic coefficients directly from the manufacturer's website (e.g., bergerbullets.com, hornady.com, nosler.com, sierrabullets.com) for the bullet: "${bulletQuery}". If you cannot verify the bullet on the manufacturer site, return { "found": false }. If found, return: { "found": true, "manufacturer_source": string, "bc_g7": float, "drag_curve": [{ "mach": float, "cd": float }], "stability_required": float, "bearing_surface": float, "weight_grains": float, "caliber_inches": float, "length_inches": float }. IMPORTANT: Weight, caliber, length, and bearing surface MUST perfectly match the manufacturer's officially published specs. Provide at least 8 drag_curve points from Mach 0.5 to 3.0 derived from the bullet's profile.`;
+
+            const fetchWithRetry = async (retries = 0) => {
+              try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: bulletQuery }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: { responseMimeType: "application/json" }
+                  })
+                });
+                if (!response.ok) throw new Error('API request failed');
+                const result = await response.json();
+                const data = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+                
+                if (data.found === false || !data.drag_curve || !Array.isArray(data.drag_curve) || data.drag_curve.length < 3) {
+                    setRadarData(null);
+                    setRadarError(`No specific manufacturer data found for "${bulletQuery}".`);
+                    setApiLog(`Search failed: Manufacturer profile not found.`);
+                    setExpandedSections(prev => ({...prev, projectile: true}));
+                    if (isProTier) setActiveTab('harmonics'); 
+                    return;
+                }
+
+                data.drag_curve = data.drag_curve
+                  .map(pt => ({ mach: parseFloat(pt.mach), cd: parseFloat(pt.cd) }))
+                  .filter(pt => !isNaN(pt.mach) && !isNaN(pt.cd))
+                  .sort((a, b) => a.mach - b.mach);
+
+                setRadarData(data);
+                
+                setInputs(prev => ({ 
+                  ...prev, 
+                  bulletName: bulletQuery, 
+                  bearingSurface: safeFloat(data.bearing_surface || data.bearingSurface, prev.bearingSurface),
+                  bulletWeight: safeFloat(data.weight_grains || data.weight, prev.bulletWeight),
+                  bulletCaliber: safeFloat(data.caliber_inches || data.caliber || data.bulletCaliber, prev.bulletCaliber),
+                  bulletLength: safeFloat(data.length_inches || data.length, prev.bulletLength),
+                  bcG7: safeFloat(data.bc_g7 || data.bcG7, prev.bcG7)
+                }));
+                
+                if (isProTier) {
+                    setApiLog(`Pro Bullet Loaded: ${bulletQuery} (Source: ${data.manufacturer_source || 'Manufacturer Web'})`);
+                    setActiveTab('harmonics'); 
+                } else {
+                    setApiLog(`Basic Specs Loaded from Manufacturer: ${bulletQuery}. Upgrade to Pro for PDM.`);
+                }
+                
+                setExpandedSections(prev => ({...prev, projectile: true}));
+              } catch (err) {
+                if (retries < 3) {
+                  await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+                  return fetchWithRetry(retries + 1);
+                }
+                setApiLog("Bullet database unreachable.");
+                setRadarError("API Connection Timeout. Radar database unreachable.");
+                setRadarData(null);
+              }
+            };
+            await fetchWithRetry();
+            setIsFetching(false);
+          };
+
+          const fetchBrassData = async (query) => {
+            if (!query) return;
+            setIsFetching(true);
+            setApiLog(`Connecting to Manufacturer Labs for ${query}...`);
+            
+            const systemPrompt = `You are a high-end ballistics data aggregator. Retrieve the EXACT published physical properties directly from the brass manufacturer's official website (e.g., lapua.com, alphamunitions.com, petersoncartridge.com, starlinebrass.com, normashooting.com) for the brass casing: "${query}". If you cannot verify the brass on a manufacturer site, return { "found": false }. If found, return: { "found": true, "manufacturer_source": string, "case_capacity_h2o": float, "case_length_inches": float, "primer_size": "Small"|"Large" }. IMPORTANT: "case_capacity_h2o" MUST be the specific manufacturer's average water capacity in grains, as premium brass often has thicker webs and differs from generic SAAMI specs.`;
+            const userQuery = `Official manufacturer case capacity and dimensions for ${query}`;
+
+            const fetchWithRetry = async (retries = 0) => {
+              try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: { responseMimeType: "application/json" }
+                  })
+                });
+                if (!response.ok) throw new Error('API request failed');
+                const result = await response.json();
+                const data = JSON.parse(result.candidates?.[0]?.content?.parts?.[0]?.text || "{}");
+                
+                if (data.found === false) {
+                    setApiLog(`Search failed: Manufacturer profile for "${query}" not found.`);
+                    setExpandedSections(prev => ({...prev, chamber: true}));
+                    return;
+                }
+
+                setInputs(prev => ({ 
+                  ...prev, 
+                  brassManufacturer: query.split(' ')[0], 
+                  caseVolume: safeFloat(data.case_capacity_h2o || data.caseCapacity, prev.caseVolume),
+                  caseLength: safeFloat(data.case_length_inches || data.caseLength, prev.caseLength)
+                }));
+                
+                setApiLog(`Success: Loaded ${query}. H2O: ${data.case_capacity_h2o || data.caseCapacity ? (data.case_capacity_h2o || data.caseCapacity) + ' gr' : 'Default'}.`);
+                setExpandedSections(prev => ({...prev, chamber: true}));
+              } catch (err) {
+                if (retries < 3) {
+                  await new Promise(r => setTimeout(r, Math.pow(2, retries) * 1000));
+                  return fetchWithRetry(retries + 1);
+                }
+                setApiLog("API Timeout. Verify connectivity.");
+              }
+            };
+            await fetchWithRetry();
+            setIsFetching(false);
+          };
+
+          // --- AI FEATURES ---
+          const generateAIGunsmithReport = async () => {
+            if (!results) return;
+            setIsConsultingAI(true);
+            setAiGunsmithReport(null);
+            
+            const systemPrompt = `You are a master ballistician, precision rifle shooter, and expert gunsmith. 
+            Analyze the thermodynamic simulation data for this custom rifle load and provide a concise, highly technical 3-paragraph report.
+            Paragraph 1: Assess safety and pressure. Note if the pressure is dangerously high, approaching max, or risking a squib. Discuss case fill ratio (compressed loads vs empty space).
+            Paragraph 2: Analyze powder efficiency. Based on the barrel length and burn percentage, is this powder burning completely, or is it too slow/fast for this case volume?
+            Paragraph 3: Provide actionable tuning advice to the reloader. What should their next step be (e.g., seating depth tests, switching to a faster powder, looking for accuracy nodes)?
+            Do not use markdown headers, just return three cleanly separated paragraphs. Use a professional, authoritative tone.`;
+
+            const userPrompt = `
+              Cartridge: ${inputs.brassCaliber}
+              Barrel Length: ${inputs.barrelLength} inches
+              Bullet: ${inputs.bulletWeight}gr ${inputs.bulletName}
+              Powder: ${inputs.powderCharge}gr ${inputs.powderName}
+              ---
+              Simulation Output:
+              Peak Pressure: ${results.peakPressure} PSI (Max standard limit is ${inputs.maxPressure} PSI)
+              Muzzle Velocity: ${results.muzzleVelocity} FPS
+              Case Fill Ratio: ${results.caseFill.toFixed(1)}%
+              Powder Burned at Exit: ${results.burnPercent}%
+              Estimated Barrel Life: ${results.barrelLife} rounds
+            `;
+
+            try {
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: userPrompt }] }],
+                  systemInstruction: { parts: [{ text: systemPrompt }] }
+                })
+              });
+              
+              if (!response.ok) throw new Error('API failed');
+              const result = await response.json();
+              setAiGunsmithReport(result.candidates[0].content.parts[0].text);
+            } catch (e) {
+              setAiGunsmithReport("Communication with AI Gunsmith failed. Please check network connectivity or try again later.");
+            }
+            setIsConsultingAI(false);
+          };
+
+          const analyzeTargetImage = async () => {
+            if (!targetFile) return;
+            setIsAnalyzing(true);
+            setTargetResults(null);
+
+            try {
+              const base64Data = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  resolve(reader.result.split(',')[1]);
+                };
+                reader.readAsDataURL(targetFile);
+              });
+
+              const systemPrompt = `You are a master marksman and competitive shooter. Analyze this uploaded paper target image. Estimate the shot group dispersion based on visual geometry (assume standard 1-inch grids or standard target scaling if no reference is obvious).
+              Output strictly as a JSON object containing:
+              {
+                "es": "string (e.g., '0.75')",
+                "mr": "string (e.g., '0.25')",
+                "poi": "string (e.g., 'U 0.2, R 0.1')",
+                "diagnosis": "string (A 2-sentence technical analysis of the group shape. e.g., 'Significant vertical stringing observed, suggesting velocity SD issues or edge-of-node harmonics. Recommend adjusting seating depth.')"
+              }`;
+
+              const payload = {
+                contents: [{
+                  role: "user",
+                  parts: [
+                    { text: "Analyze the shot group in this target and return the specified JSON metrics." },
+                    { inlineData: { mimeType: targetFile.type, data: base64Data } }
+                  ]
+                }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: { responseMimeType: "application/json" }
+              };
+
+              const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+
+              if (!response.ok) throw new Error('API failed');
+              const result = await response.json();
+              const parsedData = JSON.parse(result.candidates[0].content.parts[0].text);
+              
+              setTargetResults({
+                es: parsedData.es || "N/A",
+                mr: parsedData.mr || "N/A",
+                poi: parsedData.poi || "N/A",
+                diagnosis: parsedData.diagnosis || "Analysis completed, but pattern is inconclusive."
+              });
+
+            } catch (e) {
+              setTargetResults({
+                es: "ERR", mr: "ERR", poi: "ERR",
+                diagnosis: "Computer Vision API failed. Please ensure the image is clear and try again."
+              });
+            }
+            setIsAnalyzing(false);
+          };
+
+
+          // --- HIGH STABILITY PHYSICS ENGINE ---
+          const runPhysicsModel = (simInputs, simRadarData, chargeGr, burnRateMod, generateHistory = false, customVivacity = null) => {
+            const grToKg = 0.0000647989;
+            const inToM = 0.0254;
+            const bulletMass = simInputs.bulletWeight * grToKg;
+            const boreArea = Math.pow((simInputs.bulletCaliber / 2) * inToM, 2) * Math.PI; 
+            
+            const weightingFactor = simInputs.cartridgeType === 'Straight' ? 0.33 : 0.5;
+            const H2O_GRAIN_TO_M3 = 0.0000000647989; 
+
+            const seatingDepthInches = Math.max(0, (simInputs.caseLength + simInputs.bulletLength) - simInputs.coal);
+            const seatingDepthMeters = seatingDepthInches * inToM;
+            const seatedVolumeM3 = seatingDepthMeters * boreArea;
+            const baseChamberVolM3 = simInputs.caseVolume * H2O_GRAIN_TO_M3; 
+            const usableChamberVolM3 = Math.max(0.0000001, baseChamberVolM3 - seatedVolumeM3);
+            const barrelLenM = simInputs.barrelLength * inToM;
+            
+            const caliberFactor = Math.pow(simInputs.bulletCaliber / 0.243, 2);
+            
+            const powderVolumeH2O = chargeGr / (simInputs.powderDensity || 0.9);
+            const usableChamberVolH2O = usableChamberVolM3 / H2O_GRAIN_TO_M3;
+            const caseFillRatio = powderVolumeH2O / usableChamberVolH2O;
+
+            const getShotStartForce = () => {
+              let base = 400; 
+              if (simInputs.bulletConstruction === 'Solid Copper') base = 1200; 
+              if (simInputs.bulletConstruction === 'Banded Solid') base = 800;  
+              
+              return base * caliberFactor; 
+            };
+            const shotStartForce = getShotStartForce();
+
+            const tempDelta = simInputs.currentTemp - simInputs.devTemp;
+            const tempAdjustedBurnRate = burnRateMod * (1 + (tempDelta * simInputs.tempSensitivity * 0.0005));
+
+            const powderMass = chargeGr * grToKg;
+            const effectiveMass = bulletMass + (powderMass * weightingFactor);
+            
+            let state = { t: 0, v: 0, pos: 0.0001, burnedMass: 0, p: 0, vMax: 0, pMax: 0, pMaxPos: 0 };
+            const dt = 0.000001; 
+            const history = [];
+            let stepCount = 0;
+
+            state.burnedMass = Math.min(powderMass, 0.00003); 
+
+            const getBurnIncrement = (currentP, currentBurned) => {
+              if (currentBurned >= powderMass) return 0;
+              
+              let magnumSlowdown = Math.max(1.0, simInputs.caseVolume / 45.0);
+              let baseTimeConst = 2400.0 * Math.pow(magnumSlowdown, 0.50); 
+              
+              let currentP_MPa = currentP / 1000000.0; 
+              
+              let safeP_MPa = Math.max(10.0, currentP_MPa); 
+              let cappedP_MPa = Math.min(safeP_MPa, 200.0); 
+              
+              let pressureRatio = cappedP_MPa / 250.0; 
+              
+              let activeVivacity = customVivacity !== null ? customVivacity : (simInputs.vivacityExponent || 0.45);
+              let pressureMod = Math.pow(pressureRatio, activeVivacity); 
+              
+              let compressionSpike = caseFillRatio > 1.0 ? Math.pow(caseFillRatio, 1.25) : 1.0;
+              let burnTimeConst = (baseTimeConst / tempAdjustedBurnRate) / compressionSpike; 
+              
+              let z = currentBurned / powderMass; 
+              let formFactor = simInputs.powderType === 'Ball' ? 1.0 - (0.3 * z) : simInputs.powderType === 'Multi-perf' ? 1.0 + (0.2 * z) : 1.0;
+              
+              let baseRate = powderMass / burnTimeConst;
+              let cappedMod = Math.min(10.0, pressureMod * formFactor); 
+              
+              return baseRate * cappedMod * (dt * 1000000); 
+            };
+
+            while (state.pos < barrelLenM && stepCount < 35000) {
+              stepCount++;
+              let dw = getBurnIncrement(state.p, state.burnedMass);
+              state.burnedMass = Math.min(powderMass, state.burnedMass + dw);
+              
+              let travelDist = Math.max(0, state.pos - 0.0001);
+              let V_chamber = usableChamberVolM3 + (boreArea * travelDist);
+              
+              let solidPowderVol = (powderMass - state.burnedMass) / 1600; 
+              let covolumeVol = state.burnedMass * 0.001; 
+              
+              let V_free = V_chamber - solidPowderVol - covolumeVol;
+              V_free = Math.max(usableChamberVolM3 * 0.12, V_free);
+              
+              let energyReleased = state.burnedMass * (simInputs.heatOfExplosion * 1000); 
+              let bulletKE = 0.5 * effectiveMass * state.v * state.v;
+              let heatLoss = energyReleased * 0.03; 
+              let thermalEnergy = Math.max(0, energyReleased - bulletKE - heatLoss);
+              
+              let gammaMinus1 = (simInputs.gamma || 1.25) - 1.0;
+              state.p = (gammaMinus1 * thermalEnergy) / V_free;
+              
+              let isEngraving = state.pos <= 0.0105; 
+              let bearingSurfaceDrag = (simInputs.bearingSurface / 0.450) * 10 * caliberFactor; 
+              let effectiveBC = (isProTier && simRadarData) ? simRadarData.bc_g7 : simInputs.bcG7;
+              let dynamicFriction = (15 * caliberFactor) * (1 + (0.5 - (effectiveBC||0.26))) + bearingSurfaceDrag; 
+              
+              let currentResistance = isEngraving ? shotStartForce : dynamicFriction;
+              let force = (state.p * boreArea) - currentResistance; 
+              
+              state.v += (force / effectiveMass) * dt; 
+              if (state.v < 0) state.v = 0; 
+              state.pos += state.v * dt;
+              
+              state.t += dt;
+              
+              if (state.p > state.pMax) {
+                state.pMax = state.p;
+                state.pMaxPos = state.pos;
+              }
+              if (state.v > state.vMax) state.vMax = state.v;
+              
+              if (generateHistory && stepCount % 20 === 0) { 
+                history.push({ 
+                  time: (state.t * 1000).toFixed(3), 
+                  travel: parseFloat((travelDist / inToM).toFixed(2)),
+                  pressure: Math.round(state.p / 6894.76), 
+                  velocity: Math.round(state.v * 3.28084),
+                  burnPercent: Math.min(100, ((state.burnedMass / powderMass) * 100)).toFixed(1)
+                });
+              }
+            }
+
+            let exactExitTime = state.t;
+            if (state.v > 0 && state.pos > barrelLenM) {
+                let overshootMeters = state.pos - barrelLenM;
+                let timeOvershoot = overshootMeters / state.v;
+                exactExitTime = Math.max(0.0001, state.t - timeOvershoot);
+            }
+
+            if (generateHistory) {
+                history.push({ 
+                  time: (exactExitTime * 1000).toFixed(3), 
+                  travel: parseFloat((barrelLenM / inToM).toFixed(2)),
+                  pressure: Math.round(state.pExit / 6894.76), 
+                  velocity: Math.round(state.vMax * 3.28084),
+                  burnPercent: Math.min(100, ((state.burnedMass / powderMass) * 100)).toFixed(1)
+                });
+            }
+
+            return { pMax: state.pMax, pMaxPos: state.pMaxPos, vMax: state.vMax, t: exactExitTime, pExit: state.p, history, burnPercent: Math.min(100, ((state.burnedMass / powderMass) * 100)).toFixed(1) };
+          };
+
+          const runSimulation = () => {
+            const simInputs = getSanitizedInputs();
+
+            const powderChargeGr = simInputs.powderCharge;
+            if (powderChargeGr === 0 || simInputs.bulletWeight === 0 || simInputs.barrelLength === 0) {
+                setIsSimulating(false);
+                return;
+            }
+
+            const mainRes = runPhysicsModel(simInputs, radarData, powderChargeGr, simInputs.burnRateMod, true);
+            const baselineTimeMs = mainRes.t * 1000;
+            const peakPsi = mainRes.pMax / 6894.76;
+
+            const inToM = 0.0254;
+            const H2O_GRAIN_TO_M3 = 0.0000000647989; 
+            const boreArea = Math.pow((simInputs.bulletCaliber / 2) * inToM, 2) * Math.PI; 
+            const seatingDepthInches = Math.max(0, (simInputs.caseLength + simInputs.bulletLength) - simInputs.coal);
+            const seatingDepthMeters = seatingDepthInches * inToM;
+            const seatedVolumeM3 = seatingDepthMeters * boreArea;
+            const baseChamberVolM3 = simInputs.caseVolume * H2O_GRAIN_TO_M3; 
+            const usableChamberVolM3 = Math.max(0.0000001, baseChamberVolM3 - seatedVolumeM3);
+            const usableChamberVolH2O = usableChamberVolM3 / H2O_GRAIN_TO_M3;
+
+            const heatFactor = simInputs.heatOfExplosion / 3800; 
+
+            const powderVolumeH2O = powderChargeGr / simInputs.powderDensity;
+            const caseFillPercent = (powderVolumeH2O / usableChamberVolH2O) * 100;
+            
+            const boreAreaSqIn = Math.pow(simInputs.bulletCaliber / 2, 2) * Math.PI;
+            const overboreRatio = powderChargeGr / boreAreaSqIn;
+            
+            const overboreFactor = Math.pow(600 / overboreRatio, 1.7);
+            const pressureFactor = Math.pow(60000 / Math.max(peakPsi, 30000), 1.2);
+            
+            const estimatedBarrelLife = Math.round(5000 * overboreFactor * pressureFactor * heatFactor);
+
+            let allNodes = [];
+            let displayNodes = [];
+            let harmonicWaveData = [];
+            let closestNodeObj = null;
+            let nodeQuality = null;
+
+            if (isProTier) {
+                const baseNodes24 = [
+                  { id: 1, time: 0.9421 }, { id: 2, time: 1.0113 }, { id: 3, time: 1.0853 },
+                  { id: 4, time: 1.1645 }, { id: 5, time: 1.2491 }, { id: 6, time: 1.3395 },
+                  { id: 7, time: 1.4363 }, { id: 8, time: 1.5401 }, { id: 9, time: 1.6514 },
+                  { id: 10, time: 1.7709 }, { id: 11, time: 1.8996 }, { id: 12, time: 2.0384 },
+                  { id: 13, time: 2.1880 }, { id: 14, time: 2.3490 }, { id: 15, time: 2.5220 },
+                  { id: 16, time: 2.7070 }, { id: 17, time: 2.9050 }, { id: 18, time: 3.1160 },
+                  { id: 19, time: 3.3400 }, { id: 20, time: 3.5780 } 
+                ];
+                
+                allNodes = baseNodes24.map(node => {
+                    const targetNodeTime = node.time * (simInputs.barrelLength / 24);
+                    let lowCharge, highCharge;
+                    
+                    if (targetNodeTime > baselineTimeMs) {
+                        lowCharge = 0.5;
+                        highCharge = powderChargeGr;
+                    } else {
+                        lowCharge = powderChargeGr;
+                        highCharge = Math.max(powderChargeGr * 2.0, simInputs.caseVolume * 2.0); 
+                    }
+
+                    let bestCharge = powderChargeGr;
+                    for (let searchStep = 0; searchStep < 18; searchStep++) {
+                        let midCharge = (lowCharge + highCharge) / 2;
+                        let simRes = runPhysicsModel(simInputs, radarData, midCharge, simInputs.burnRateMod, false);
+                        if ((simRes.t * 1000) > targetNodeTime) {
+                            lowCharge = midCharge; 
+                        } else {
+                            highCharge = midCharge;
+                        }
+                        bestCharge = midCharge;
+                    }
+
+                    let verifySim = runPhysicsModel(simInputs, radarData, bestCharge, simInputs.burnRateMod, false);
+                    let timeDiff = Math.abs((verifySim.t * 1000) - targetNodeTime);
+                    let psi = verifySim.pMax / 6894.76;
+                    
+                    let requiredChargeStr = "N/A";
+                    let requiredChargeNum = null;
+                    let isOverPressure = false;
+                    let isSquib = false;
+                    
+                    if (timeDiff < 0.15) {
+                        requiredChargeNum = bestCharge;
+                        requiredChargeStr = `${bestCharge.toFixed(1)}gr`;
+                        if (psi > simInputs.maxPressure) {
+                            isOverPressure = true;
+                        } else if (psi < 30000) {
+                            isSquib = true;
+                        }
+                    } else {
+                        requiredChargeStr = "UNREACHABLE";
+                    }
+
+                    return { 
+                      id: node.id, 
+                      time: targetNodeTime, 
+                      requiredCharge: requiredChargeNum,
+                      requiredChargeStr: requiredChargeStr,
+                      isOverPressure: isOverPressure,
+                      isSquib: isSquib,
+                      psi: psi
+                    };
+                });
+                
+                const exitTimeMs = mainRes.t * 1000;
+                closestNodeObj = allNodes.reduce((prev, curr) => Math.abs(curr.time - exitTimeMs) < Math.abs(prev.time - exitTimeMs) ? curr : prev);
+                const closestIdx = allNodes.findIndex(n => n.id === closestNodeObj.id);
+                nodeQuality = Math.abs(exitTimeMs - closestNodeObj.time) < 0.015 ? 'Gold' : 'Suboptimal';
+
+                let startIndex = Math.max(0, closestIdx - 2);
+                let endIndex = startIndex + 4;
+                if (endIndex >= allNodes.length) {
+                    endIndex = allNodes.length - 1;
+                    startIndex = Math.max(0, endIndex - 4);
+                }
+                displayNodes = allNodes.slice(startIndex, endIndex + 1);
+
+                if (displayNodes.length > 0) {
+                    const minTime = displayNodes[0].time - 0.2;
+                    const maxTime = displayNodes[displayNodes.length - 1].time + 0.2;
+                    for (let t = minTime; t <= maxTime; t += 0.005) {
+                       let closestDist = 999;
+                       for (let n of displayNodes) {
+                          let dist = Math.abs(t - n.time);
+                          if (dist < closestDist) closestDist = dist;
+                       }
+                       let stress = Math.min(1, closestDist * 15); 
+                       harmonicWaveData.push({ time: parseFloat(t.toFixed(3)), stress: stress });
+                    }
+                }
+            }
+
+            const ladderData = [];
+            for (let step = -12; step <= 0; step++) {
+               let testCharge = powderChargeGr + (step * 0.3);
+               let res = runPhysicsModel(simInputs, radarData, testCharge, simInputs.burnRateMod, false);
+               ladderData.push({
+                   charge: `${testCharge.toFixed(1)}`, 
+                   pressure: Math.round(res.pMax / 6894.76),
+                   velocity: Math.round(res.vMax * 3.28084),
+                   burnPercent: parseFloat(res.burnPercent)
+               });
+            }
+
+            setAiGunsmithReport(null);
+
+            setResults({
+              muzzleVelocity: Math.round(mainRes.vMax * 3.28084),
+              peakPressure: Math.round(mainRes.pMax / 6894.76),
+              muzzlePressure: Math.round(mainRes.pExit / 6894.76),
+              peakPressurePos: (mainRes.pMaxPos / inToM).toFixed(2),
+              barrelTime: (mainRes.t * 1000).toFixed(4),
+              nodeQuality: nodeQuality,
+              closestNode: closestNodeObj?.time.toFixed(4),
+              closestNodeId: closestNodeObj?.id,
+              obtNodes: allNodes,
+              displayNodes: displayNodes, 
+              harmonicWaveData: harmonicWaveData,
+              caseFill: caseFillPercent,
+              usableCaseVol: usableChamberVolH2O,
+              barrelLife: estimatedBarrelLife,
+              history: mainRes.history,
+              ladderData,
+              burnPercent: mainRes.burnPercent
+            });
+            
+            setIsSimulating(false);
+          };
+
+          useEffect(() => { 
+            setIsSimulating(true);
+            const timeoutId = setTimeout(() => {
+                runSimulation();
+            }, 400); 
+            return () => clearTimeout(timeoutId);
+          }, [inputs, radarData, isProTier]);
+
+          const pressureState = useMemo(() => {
+            const p = results?.peakPressure;
+            const max = inputs.maxPressure;
+            if (!p) return { color: "text-white", text: "" };
+            if (p > max) return { color: "text-red-500", text: `WARNING: EXCEEDS ${inputs.pressureStandard}` };
+            if (p >= max * 0.95) return { color: "text-amber-500", text: `HIGH: APPROACHING ${inputs.pressureStandard} MAX` };
+            if (p <= 30000) return { color: "text-yellow-500", text: "LOW: SQUIB RISK" };
+            return { color: "text-emerald-500", text: "SAFE: WITHIN LIMITS" };
+          }, [results?.peakPressure, inputs.maxPressure, inputs.pressureStandard]);
+
+          const isProTab = ['harmonics', 'chamber', 'target ai'].includes(activeTab);
+
+          if (hasDeclinedDisclaimer) {
+            return (
+              <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-4 text-center selection:bg-orange-500/30">
+                <ShieldAlert size={64} className="text-red-500 mb-6" />
+                <h1 className="text-3xl font-black uppercase tracking-widest text-white mb-4">Access Denied</h1>
+                <p className="text-gray-400 font-mono max-w-md mb-8">You must accept the legal disclaimer and safety warnings to use the MTE Machining Forge simulator.</p>
+                <button onClick={() => setHasDeclinedDisclaimer(false)} className="bg-gray-800 border border-gray-700 hover:bg-gray-700 text-white px-8 py-3 rounded-xl font-bold uppercase tracking-widest transition-all">Review Disclaimer</button>
+              </div>
+            );
+          }
+
+          return (
+            <div className="min-h-screen bg-gray-950 text-gray-100 font-sans selection:bg-orange-500/30 pb-24 lg:pb-20 relative">
+              
+              {/* BETA FEEDBACK MODAL */}
+              {showFeedbackModal && (
+                <div className="fixed inset-0 z-[100] bg-gray-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-gray-900 border border-orange-500/50 rounded-3xl max-w-lg w-full p-6 lg:p-8 shadow-2xl shadow-orange-900/20 flex flex-col relative overflow-hidden max-h-[90vh] overflow-y-auto hide-scrollbar">
+                    {feedbackSubmitted ? (
+                       <div className="flex flex-col items-center justify-center text-center py-8 space-y-4">
+                          <CheckCircle size={64} className="text-emerald-500 mb-2" />
+                          <h3 className="text-2xl font-black uppercase tracking-widest text-white">Telemetry Logged</h3>
+                          <p className="text-gray-400 text-sm font-mono leading-relaxed">Your real-world chronograph data has been successfully transmitted to the MTE Engineering Team.</p>
+                          {feedbackForm.autoTrue && (
+                            <p className="text-orange-400 text-xs font-bold uppercase tracking-widest mt-2">✓ Engine Auto-Trued</p>
+                          )}
+                          <button onClick={() => {setShowFeedbackModal(false); setFeedbackSubmitted(false); setFeedbackForm({ actualVelocity: '', pressureSigns: 'None', notes: '', autoTrue: true });}} className="mt-4 bg-gray-800 hover:bg-gray-700 text-white py-3 px-8 rounded-xl font-bold uppercase tracking-widest transition-all text-xs">Close</button>
+                       </div>
+                    ) : (
+                       <>
+                          <div className="flex items-center justify-between border-b border-gray-800 pb-4 mb-6">
+                            <div className="flex items-center gap-3">
+                              <MessageSquare size={24} className="text-orange-500" />
+                              <div>
+                                <h2 className="text-lg font-black uppercase tracking-widest text-white">Beta Telemetry</h2>
+                                <p className="text-[10px] text-gray-400 uppercase tracking-widest">Ground-Truth Data Submission</p>
+                              </div>
+                            </div>
+                            <button onClick={() => setShowFeedbackModal(false)} className="text-gray-500 hover:text-white transition-colors"><X size={24}/></button>
+                          </div>
+                          
+                          <div className="space-y-5">
+                            <div className="bg-gray-950 p-4 rounded-xl border border-gray-800 flex justify-between items-center text-xs font-mono">
+                               <span className="text-gray-500">Predicted MV: <span className="text-orange-400 font-bold">{results?.muzzleVelocity || '---'} FPS</span></span>
+                               <span className="text-gray-500">Load: <span className="text-white">{inputs.powderCharge}gr</span></span>
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Garmin/LabRadar MV (FPS)</label>
+                              <input 
+                                type="number" value={feedbackForm.actualVelocity} onChange={(e) => setFeedbackForm({...feedbackForm, actualVelocity: e.target.value})}
+                                className="w-full bg-gray-800 border border-gray-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-orange-500 text-lg font-black font-mono shadow-inner"
+                                placeholder="e.g., 2910"
+                              />
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Observed Pressure Signs</label>
+                              <select 
+                                value={feedbackForm.pressureSigns} onChange={(e) => setFeedbackForm({...feedbackForm, pressureSigns: e.target.value})}
+                                className="w-full bg-gray-800 border border-gray-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-orange-500 text-sm font-mono shadow-inner"
+                              >
+                                <option value="None">None (Normal)</option>
+                                <option value="Slightly Flat Primers">Slightly Flat Primers</option>
+                                <option value="Cratered Primers">Cratered Primers</option>
+                                <option value="Heavy Bolt Lift">Heavy Bolt Lift</option>
+                                <option value="Ejector Swipe">Ejector Swipe</option>
+                                <option value="Blown Primer">Blown Primer / Catastrophic</option>
+                              </select>
+                            </div>
+
+                            <div className="flex flex-col gap-1.5">
+                              <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">Gunsmith/Shooter Notes</label>
+                              <textarea 
+                                value={feedbackForm.notes} onChange={(e) => setFeedbackForm({...feedbackForm, notes: e.target.value})}
+                                className="w-full bg-gray-800 border border-gray-700 rounded-xl py-3 px-4 text-white focus:outline-none focus:border-orange-500 text-sm font-mono h-24 resize-none shadow-inner"
+                                placeholder="Any chamber anomalies, temp shifts, or lot variances to report?"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-3 bg-gray-950 p-4 rounded-xl border border-gray-800">
+                              <input 
+                                type="checkbox" 
+                                id="autoTrueToggle"
+                                checked={feedbackForm.autoTrue}
+                                onChange={(e) => setFeedbackForm({...feedbackForm, autoTrue: e.target.checked})}
+                                className="w-5 h-5 accent-orange-500 rounded bg-gray-800 border-gray-700 focus:ring-orange-500 focus:ring-offset-gray-950"
+                              />
+                              <div className="flex flex-col">
+                                <label htmlFor="autoTrueToggle" className="text-xs font-black text-gray-200 uppercase tracking-widest cursor-pointer">Auto-True Internal Ballistics</label>
+                                <span className="text-[9px] text-gray-500 font-mono mt-0.5">Automatically reverse-engineer powder burn rate to match this MV.</span>
+                              </div>
+                            </div>
+
+                            <button 
+                              disabled={!feedbackForm.actualVelocity || isSubmittingFeedback}
+                              onClick={() => {
+                                setIsSubmittingFeedback(true);
+                                setTimeout(() => {
+                                  setIsSubmittingFeedback(false);
+                                  setFeedbackSubmitted(true);
+                                  if (feedbackForm.autoTrue && feedbackForm.actualVelocity) {
+                                     executeTruing(parseFloat(feedbackForm.actualVelocity));
+                                  }
+                                }, 1200);
+                              }}
+                              className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white py-4 rounded-xl font-black uppercase tracking-widest text-sm transition-all flex justify-center items-center gap-2 shadow-lg shadow-orange-900/20 active:scale-[0.98]"
+                            >
+                              {isSubmittingFeedback ? <RefreshCw className="animate-spin" size={18} /> : "Transmit Telemetry"}
+                            </button>
+                          </div>
+                       </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Legal Disclaimer Modal */}
+              {!hasAcceptedDisclaimer && (
+                <div className="fixed inset-0 z-[100] bg-gray-950/90 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-gray-900 border border-red-500/50 rounded-3xl max-w-2xl w-full p-6 lg:p-8 shadow-2xl shadow-red-900/20 flex flex-col max-h-[90vh]">
+                    <div className="flex items-center gap-3 text-red-500 mb-6 border-b border-gray-800 pb-4">
+                      <AlertTriangle size={32} />
+                      <h2 className="text-2xl font-black uppercase tracking-widest">Legal Disclaimer</h2>
+                    </div>
+                    <div className="overflow-y-auto pr-2 space-y-4 text-sm text-gray-300 font-mono flex-1 mb-6 hide-scrollbar">
+                      <p className="text-red-400 font-bold">WARNING: RELOADING AMMUNITION CAN BE DANGEROUS.</p>
+                      <p>The MTE Machining Forge is a theoretical internal ballistics simulator. <strong>The data generated are NOT verified load formulas.</strong></p>
+                      <ul className="list-disc pl-5 space-y-3 text-gray-400">
+                        <li>Always cross-reference with published, physically tested load data.</li>
+                        <li>The Software cannot account for all physical variables (chamber anomalies, wear, temperature spikes).</li>
+                        <li>You assume 100% of the risk associated with assembling and firing ammunition.</li>
+                      </ul>
+                    </div>
+                    <div className="flex gap-4 border-t border-gray-800 pt-6 mt-auto flex-col sm:flex-row">
+                      <button onClick={() => setHasDeclinedDisclaimer(true)} className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-4 rounded-xl font-bold uppercase tracking-widest transition-all">Decline</button>
+                      <button onClick={() => setHasAcceptedDisclaimer(true)} className="flex-1 bg-red-600 hover:bg-red-500 text-white py-4 rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-red-900/20">I Accept</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Header */}
+              <header className="border-b border-gray-800 bg-gray-900/80 backdrop-blur-xl sticky top-0 z-40 px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 md:w-11 md:h-11 bg-gradient-to-br from-orange-500 to-orange-700 rounded-xl flex items-center justify-center shadow-lg"><Zap size={20} className="text-white" /></div>
+                  <div className="flex flex-col">
+                     <h1 className="text-lg md:text-xl font-bold tracking-tight flex items-center gap-2">
+                        MTE <span className="text-orange-400">FORGE</span>
+                        <button 
+                          onClick={() => setIsProTier(!isProTier)} 
+                          className={`text-[9px] px-2 py-0.5 rounded font-black tracking-widest transition-all ${isProTier ? 'bg-orange-500 text-black shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}
+                        >
+                          {isProTier ? 'PRO' : 'BASIC'}
+                        </button>
+                     </h1>
+                     <p className="text-[10px] text-gray-500 uppercase font-mono tracking-widest hidden sm:block">Internal Ballistics Suite v{MTE_FORGE_VERSION}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                   <button 
+                     onClick={() => setIsMobileSidebarOpen(true)}
+                     className="lg:hidden bg-orange-600/10 border border-orange-500/30 text-orange-500 hover:bg-orange-600 hover:text-white px-3 py-2 rounded-xl flex items-center justify-center transition-all shadow-sm active:scale-95"
+                   >
+                     <Sliders size={18} />
+                   </button>
+
+                   <button onClick={() => setShowFeedbackModal(true)} className="hidden md:flex bg-orange-600/10 text-orange-500 border border-orange-500/30 hover:bg-orange-600 hover:text-white px-4 py-2 rounded-xl font-bold items-center gap-2 transition-all text-xs uppercase shadow-sm">
+                     <MessageSquare size={16} /> <span>Beta Feedback</span>
+                   </button>
+                   <button 
+                     onClick={handleSaveBlueprint} 
+                     className={`border px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all text-xs uppercase ${isSaving ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30' : 'bg-gray-800 hover:bg-gray-700 border-gray-700 text-white shadow-sm'}`}
+                   >
+                     {isSaving ? <CheckCircle size={16} /> : <Save size={16} />} 
+                     <span className="hidden sm:inline">{isSaving ? "Saved" : "Save"}</span>
+                   </button>
+                </div>
+              </header>
+
+              <main className="max-w-[1500px] mx-auto p-3 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-8">
+                
+                {/* SIDEBAR: INPUTS (Slide-out Drawer on Mobile) */}
+                {isMobileSidebarOpen && (
+                  <div className="fixed inset-0 bg-black/60 z-50 lg:hidden backdrop-blur-sm transition-opacity" onClick={() => setIsMobileSidebarOpen(false)}></div>
+                )}
+                <aside className={`fixed inset-y-0 left-0 z-50 w-[85%] max-w-[360px] bg-gray-950 border-r border-gray-800 p-4 md:p-5 overflow-y-auto transform transition-transform duration-300 shadow-2xl lg:static lg:w-full lg:max-w-none lg:border-none lg:p-0 lg:bg-transparent lg:shadow-none lg:col-span-3 lg:translate-x-0 ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'} space-y-3 lg:sticky lg:top-[5.5rem] lg:h-[calc(100vh-7rem)] hide-scrollbar pb-24 lg:pb-10`}>
+                  
+                  <div className="flex justify-between items-center lg:hidden mb-4 border-b border-gray-800 pb-3">
+                    <h2 className="text-orange-500 font-black uppercase tracking-widest flex items-center gap-2 text-sm"><Settings size={16}/> Blueprint Tuning</h2>
+                    <button onClick={() => setIsMobileSidebarOpen(false)} className="text-gray-400 hover:text-white bg-gray-800 p-1.5 rounded-lg"><X size={20}/></button>
+                  </div>
+
+                  <div className="bg-gray-900/50 border border-gray-800 rounded-2xl p-4 md:p-5 shadow-xl space-y-3">
+                    <h2 className="hidden lg:flex items-center gap-2 text-gray-300 font-black uppercase text-xs tracking-widest border-b border-gray-800 pb-3 mb-4">
+                      <Settings size={16} className="text-orange-500" /> Component Blueprint
+                    </h2>
+
+                    {/* SECTION: API Lookup */}
+                    <AccordionSection title="Cloud Database Search" icon={Globe} isExpanded={expandedSections.api} onToggle={() => toggleSection('api')}>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-widest leading-relaxed mb-3">Search to auto-fill complex coefficients.</p>
+                      
+                      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                        <div className="flex gap-1.5">
+                          <input 
+                            type="text" placeholder="Cartridge..."
+                            className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none placeholder-gray-600 shadow-inner"
+                            value={cartridgeSearch} onChange={(e) => setCartridgeSearch(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && fetchCartridgeData(cartridgeSearch)}
+                          />
+                          <button onClick={() => fetchCartridgeData(cartridgeSearch)} className="bg-gray-800 hover:bg-gray-700 text-orange-400 px-3 rounded-lg border border-gray-700 transition-colors"><Search size={16}/></button>
+                        </div>
+
+                        <div className="flex gap-1.5">
+                          <input 
+                            type="text" placeholder="Brass..."
+                            className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none placeholder-gray-600 shadow-inner"
+                            value={brassSearch} onChange={(e) => setBrassSearch(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && fetchBrassData(brassSearch)}
+                          />
+                          <button onClick={() => fetchBrassData(brassSearch)} className="bg-gray-800 hover:bg-gray-700 text-orange-400 px-3 rounded-lg border border-gray-700 transition-colors"><Search size={16}/></button>
+                        </div>
+
+                        <div className="flex gap-1.5">
+                          <input 
+                            type="text" placeholder="Bullet..."
+                            className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none placeholder-gray-600 shadow-inner"
+                            value={bulletSearch} onChange={(e) => setBulletSearch(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && fetchRadarData(bulletSearch)}
+                          />
+                          <button onClick={() => fetchRadarData(bulletSearch)} className="bg-gray-800 hover:bg-gray-700 text-orange-400 px-3 rounded-lg border border-gray-700 transition-colors"><Search size={16}/></button>
+                        </div>
+
+                        <div className="flex gap-1.5">
+                          <input 
+                            type="text" placeholder="Powder..."
+                            className="flex-1 bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:border-orange-500 focus:outline-none placeholder-gray-600 shadow-inner"
+                            value={powderSearch} onChange={(e) => setPowderSearch(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && fetchPowderData(powderSearch)}
+                          />
+                          <button onClick={() => fetchPowderData(powderSearch)} className="bg-gray-800 hover:bg-gray-700 text-orange-400 px-3 rounded-lg border border-gray-700 transition-colors"><Search size={16}/></button>
+                        </div>
+                      </div>
+
+                      {apiLog && (
+                        <div className={`mt-3 text-[10px] font-mono p-3 rounded-lg border leading-relaxed ${isFetching ? 'bg-orange-500/10 text-orange-400 border-orange-500/30 animate-pulse' : 'bg-gray-950/80 text-gray-400 border-gray-800 shadow-inner'}`}>
+                          {apiLog}
+                        </div>
+                      )}
+                    </AccordionSection>
+
+                    {/* INTEGRATED POWDER PROFILER */}
+                    <AccordionSection title="Mfg Powder Profiler" icon={Cpu} isExpanded={expandedSections.mfgProfile} onToggle={() => toggleSection('mfgProfile')}>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-widest leading-relaxed mb-3">
+                        Enter a published max load to reverse-engineer this powder's exact chemical burn curve before tuning your charge.
+                      </p>
+                      <div className="space-y-3 bg-gray-950/50 p-4 rounded-xl border border-gray-800 shadow-inner">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="col-span-2">
+                            <InputField label="Max Charge (gr)" value={mfgLoadData.charge} onChange={v => setMfgLoadData({...mfgLoadData, charge: v})} placeholder="e.g. 29.0" />
+                          </div>
+                          <InputField label="Target MV" value={mfgLoadData.velocity} onChange={v => setMfgLoadData({...mfgLoadData, velocity: v})} placeholder="e.g. 2950" />
+                          <InputField label="Target PSI" value={mfgLoadData.pressure} onChange={v => setMfgLoadData({...mfgLoadData, pressure: v})} placeholder="e.g. 58500" />
+                        </div>
+                        
+                        <button 
+                            disabled={!mfgLoadData.charge || !mfgLoadData.velocity || !mfgLoadData.pressure || isProfiling}
+                            onClick={() => {
+                              setIsProfiling(true);
+                              setTimeout(() => {
+                                  const simInputs = getSanitizedInputs();
+                                  const targetCharge = parseFloat(mfgLoadData.charge);
+                                  const targetMV = parseFloat(mfgLoadData.velocity);
+                                  const targetPSI = parseFloat(mfgLoadData.pressure);
+                                  
+                                  let bestMod = 1.0;
+                                  let bestExp = 0.45;
+                                  let smallestPressureError = Infinity;
+
+                                  for (let testExp = 0.10; testExp <= 0.60; testExp += 0.02) {
+                                      let lowMod = 0.1, highMod = 6.0, currentMod = 1.0, currentMV = 0;
+                                      let res;
+                                      for(let i = 0; i < 15; i++) {
+                                          currentMod = (lowMod + highMod) / 2;
+                                          res = runPhysicsModel(simInputs, radarData, targetCharge, currentMod, false, testExp);
+                                          currentMV = res.vMax * 3.28084;
+                                          if (currentMV < targetMV) lowMod = currentMod;
+                                          else highMod = currentMod;
+                                      }
+                                      
+                                      let pError = Math.abs((res.pMax / 6894.76) - targetPSI);
+                                      if (pError < smallestPressureError) {
+                                          smallestPressureError = pError;
+                                          bestMod = currentMod;
+                                          bestExp = testExp;
+                                      }
+                                  }
+
+                                  setInputs(prev => ({
+                                    ...prev, 
+                                    burnRateMod: parseFloat(bestMod.toFixed(4)),
+                                    vivacityExponent: parseFloat(bestExp.toFixed(3))
+                                  }));
+                                  setIsProfiling(false);
+                                  setProfilerResult(`Curve: ${bestExp.toFixed(3)} | Mod: ${bestMod.toFixed(4)}`);
+                              }, 100);
+                            }}
+                            className="w-full bg-blue-600/20 text-blue-400 border border-blue-500/50 hover:bg-blue-600 hover:text-white disabled:opacity-50 py-3 rounded-lg font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 text-xs mt-2"
+                        >
+                          {isProfiling ? <RefreshCw className="animate-spin" size={16} /> : "Synthesize Curve"}
+                        </button>
+                        {profilerResult && (
+                          <div className="text-center font-bold text-[10px] uppercase p-2.5 rounded-lg text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 mt-1">
+                            {profilerResult}
+                          </div>
+                        )}
+                      </div>
+                    </AccordionSection>
+
+                    {/* SECTION: Propellant */}
+                    <AccordionSection title="Propellant & Charge" icon={Zap} isExpanded={expandedSections.propellant} onToggle={() => toggleSection('propellant')}>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2">
+                           <InputField label="Charge Weight" icon={Zap} unit="gr" step={0.1} value={inputs.powderCharge} onChange={(v) => setInputs({...inputs, powderCharge: v})} tooltip="Mass of powder in grains." />
+                        </div>
+                        
+                        <div className="col-span-2 bg-gray-950 p-4 rounded-xl border border-gray-800 shadow-inner mt-1 space-y-3">
+                          <div className="flex justify-between items-center">
+                             <h4 className="text-[10px] font-black text-orange-500 uppercase tracking-widest flex items-center gap-1.5"><Crosshair size={14}/> Chronograph Truing</h4>
+                             {calibrationResult && <span className="text-[9px] text-emerald-400 font-bold uppercase">{calibrationResult}</span>}
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="flex-1">
+                               <InputField label="Measured MV" value={chronoVelocity} onChange={setChronoVelocity} placeholder="e.g. 2850" />
+                            </div>
+                            <button 
+                               onClick={() => executeTruing(parseFloat(chronoVelocity))}
+                               disabled={!chronoVelocity || isSimulating}
+                               className="mt-6 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-white px-4 rounded-lg font-bold text-[10px] md:text-xs uppercase tracking-widest border border-gray-700 transition-all active:scale-95 flex items-center gap-2"
+                            >
+                               <RefreshCw size={12} className={isSimulating ? "animate-spin" : ""} /> Sync
+                            </button>
+                          </div>
+                          <div className="pt-2 border-t border-gray-800/50 mt-1">
+                            <InputField label="Active Burn Mod" value={inputs.burnRateMod} step={0.01} onChange={(v) => setInputs({...inputs, burnRateMod: v})} tooltip="Relative burn rate multiplier (Baseline 1.0)." />
+                          </div>
+                        </div>
+                        
+                        <div className="col-span-2 flex flex-col gap-1.5 relative group cursor-help w-full mt-1">
+                          <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center justify-between">
+                            Grain Profile
+                            <HelpCircle size={14} className="text-gray-600 group-hover:text-orange-500 transition-colors" />
+                            <div className="absolute bottom-full right-0 mb-2 w-56 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-[11px] leading-relaxed text-gray-200 normal-case tracking-normal opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[70]">
+                              Shape affects the burn curve. Ball is degressive, Stick is neutral.
+                            </div>
+                          </label>
+                          <select value={inputs.powderType} onChange={(e) => setInputs({...inputs, powderType: e.target.value})} className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 px-3 text-white focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm md:text-base font-mono shadow-inner">
+                            <option value="Stick">Stick (Neutral)</option>
+                            <option value="Ball">Ball (Degress.)</option>
+                            <option value="Multi-perf">Multi (Progress.)</option>
+                          </select>
+                        </div>
+
+                        <div className="col-span-2 grid grid-cols-2 gap-3 p-4 bg-gray-950/50 rounded-xl border border-gray-800 mt-2 shadow-inner">
+                           <InputField label="Heat (kJ/kg)" value={inputs.heatOfExplosion} step={10} onChange={(v) => setInputs({...inputs, heatOfExplosion: v})} tooltip="Specific Heat of Explosion. Drives combustion temp and barrel wear." />
+                           <InputField label="Gamma (γ)" value={inputs.gamma} step={0.01} onChange={(v) => setInputs({...inputs, gamma: v})} tooltip="Ratio of specific heats for the evolving gas." />
+                           <div className="col-span-2">
+                             <InputField label="Bulk Density (g/cc)" value={inputs.powderDensity} step={0.01} onChange={(v) => setInputs({...inputs, powderDensity: v})} tooltip="Volume scaling: 1.0 is water. Typical powder is 0.85-0.95. Fluffy powders overflow the case faster." />
+                           </div>
+                        </div>
+                      </div>
+                    </AccordionSection>
+
+                    {/* SECTION: Projectile */}
+                    <AccordionSection title="Projectile Profile" icon={Target} isExpanded={expandedSections.projectile} onToggle={() => toggleSection('projectile')}>
+                      <div className="grid grid-cols-2 gap-3">
+                        <InputField label="Weight (gr)" value={inputs.bulletWeight} onChange={(v) => setInputs({...inputs, bulletWeight: v})} />
+                        <InputField label="Caliber (in)" step={0.001} value={inputs.bulletCaliber} onChange={(v) => setInputs({...inputs, bulletCaliber: v})} />
+                        <InputField label="Length (in)" step={0.001} value={inputs.bulletLength} onChange={(v) => setInputs({...inputs, bulletLength: v})} tooltip="Total physical length of the projectile." />
+                        <InputField label="Bearing (in)" step={0.001} value={inputs.bearingSurface} onChange={(v) => setInputs({...inputs, bearingSurface: v})} tooltip="Length of full-diameter shank touching the rifling. Affects friction." />
+                        
+                        {/* EXPOSED G7 BC FIELD */}
+                        <div className="col-span-2 border-t border-gray-800 pt-4 mt-2">
+                          <InputField label="G7 Ballistic Coeff." step={0.001} value={inputs.bcG7} onChange={(v) => setInputs({...inputs, bcG7: v})} tooltip="G7 BC used for dynamic bore friction if Radar PDM is missing or you are on Basic tier." />
+                        </div>
+                        
+                        <div className="col-span-2 flex flex-col gap-1.5 relative group cursor-help w-full mt-1">
+                          <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center justify-between">
+                            Construction
+                            <HelpCircle size={14} className="text-gray-600 group-hover:text-orange-500 transition-colors" />
+                            <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-[11px] leading-relaxed text-gray-200 normal-case tracking-normal opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[70]">
+                              Determines Shot Start (Engraving) Force. Solid copper requires vastly higher initial pressure to engrave.
+                            </div>
+                          </label>
+                          <select value={inputs.bulletConstruction} onChange={(e) => setInputs({...inputs, bulletConstruction: e.target.value})} className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 px-3 text-white focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm md:text-base font-mono shadow-inner">
+                            <option value="Jacketed Lead Core">Jacketed Lead Core (Standard)</option>
+                            <option value="Solid Copper">Solid Copper (Monolithic)</option>
+                            <option value="Banded Solid">Banded Solid (Relief Grooves)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </AccordionSection>
+
+                    {/* SECTION: Chamber & Brass */}
+                    <AccordionSection title="Chamber & Brass" icon={Disc} isExpanded={expandedSections.chamber} onToggle={() => toggleSection('chamber')}>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2 flex flex-col gap-1.5 w-full">
+                          <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-widest">Cartridge Geometry</label>
+                          <select value={inputs.cartridgeType} onChange={(e) => setInputs({...inputs, cartridgeType: e.target.value})} className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 px-3 text-white focus:outline-none focus:ring-1 focus:ring-orange-500 text-sm md:text-base font-mono shadow-inner">
+                            <option value="Bottleneck">Bottleneck (0.5 Gas Inertia)</option>
+                            <option value="Straight">Straight-Wall (0.33 Gas Inertia)</option>
+                          </select>
+                        </div>
+                        
+                        <InputField label="H2O Vol (gr)" value={inputs.caseVolume} onChange={(v) => setInputs({...inputs, caseVolume: v})} tooltip="Volume of fired, unsized brass filled with water." />
+                        <InputField label="Max PSI" value={inputs.maxPressure} step={1000} onChange={(v) => setInputs({...inputs, maxPressure: v})} tooltip="SAAMI or CIP maximum proof pressure." />
+                        <InputField label="Case Len (in)" step={0.001} value={inputs.caseLength} onChange={(v) => setInputs({...inputs, caseLength: v})} />
+                        <InputField label="COAL (in)" step={0.001} value={inputs.coal} onChange={(v) => setInputs({...inputs, coal: v})} tooltip="Cartridge Overall Length. Used to calculate seating depth and usable volume." />
+                        <div className="col-span-2 border-t border-gray-800 mt-4 pt-4 grid grid-cols-2 gap-3">
+                           <InputField label="Barrel (in)" value={inputs.barrelLength} onChange={(v) => setInputs({...inputs, barrelLength: v})} />
+                           <InputField label="Twist (1:x)" value={inputs.twistRate} step={0.5} onChange={(v) => setInputs({...inputs, twistRate: v})} />
+                        </div>
+                      </div>
+                    </AccordionSection>
+
+                    {/* SECTION: Environmentals */}
+                    <AccordionSection title="Environmentals" icon={Thermometer} isExpanded={expandedSections.environment} onToggle={() => toggleSection('environment')}>
+                       <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2">
+                           <InputField label="Temp Sens. (FPS/°F)" step={0.1} value={inputs.tempSensitivity} onChange={(v) => setInputs({...inputs, tempSensitivity: v})} tooltip="How much MV shifts per degree of temperature change." />
+                        </div>
+                        <InputField label="Dev Temp (°F)" value={inputs.devTemp} onChange={(v) => setInputs({...inputs, devTemp: v})} tooltip="The temperature when you developed/calibrated the load." />
+                        <InputField label="Field Temp (°F)" value={inputs.currentTemp} onChange={(v) => setInputs({...inputs, currentTemp: v})} tooltip="The temperature at the range today." />
+                      </div>
+                    </AccordionSection>
+
+                  </div>
+                </aside>
+
+                {/* MAIN CONTENT AREA */}
+                <div className="lg:col-span-9 space-y-5 md:space-y-8">
+                  
+                  <div className={`transition-all duration-300 ${isSimulating ? 'opacity-50 blur-[2px] pointer-events-none scale-[0.995]' : 'opacity-100 blur-0 scale-100'}`}>
+                    
+                    {/* Top Stats Dash */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5 mb-6 md:mb-8">
+                      <div className="bg-gradient-to-br from-gray-900 to-gray-950 border border-gray-800 p-5 md:p-6 rounded-3xl shadow-xl relative overflow-hidden">
+                        <div className="absolute -right-4 -top-4 opacity-5"><Zap size={80}/></div>
+                        <p className="text-gray-400 text-[10px] md:text-xs font-black uppercase tracking-widest mb-2 flex items-center justify-between relative z-10">Muzzle Velocity <Zap size={14} className="text-orange-500/50 hidden md:block"/></p>
+                        <div className="flex items-baseline gap-1.5 md:gap-2 relative z-10"><span className="text-4xl md:text-5xl font-black text-white">{results?.muzzleVelocity || '---'}</span><span className="text-orange-400 text-[10px] md:text-xs font-bold">FPS</span></div>
+                      </div>
+                      
+                      <div className={`bg-gradient-to-br from-gray-900 to-gray-950 border p-5 md:p-6 rounded-3xl shadow-xl flex flex-col justify-between relative overflow-hidden transition-colors duration-500 ${pressureState.color === 'text-red-500' ? 'border-red-500/30' : (pressureState.color === 'text-amber-500' ? 'border-amber-500/30' : 'border-gray-800')}`}>
+                        <div className="absolute -right-4 -top-4 opacity-5"><AlertTriangle size={80}/></div>
+                        <p className="text-gray-400 text-[10px] md:text-xs font-black uppercase tracking-widest mb-2 flex items-center justify-between relative z-10">Peak Pressure <AlertTriangle size={14} className={`${pressureState.color.replace('text-', 'text-').replace('500', '500/50').replace('600', '600/50')} hidden md:block`}/></p>
+                        <div className="flex flex-col relative z-10">
+                          <div className="flex items-baseline gap-1.5 md:gap-2"><span className={`text-4xl md:text-5xl font-black tracking-tight ${pressureState.color}`}>{results?.peakPressure?.toLocaleString() || '---'}</span><span className="text-gray-500 text-[10px] md:text-xs font-bold">PSI</span></div>
+                          {pressureState.text && <span className={`text-[9px] md:text-[10px] font-bold uppercase tracking-widest mt-1.5 ${pressureState.color}`}>{pressureState.text}</span>}
+                        </div>
+                      </div>
+                      
+                      <div className="bg-gradient-to-br from-gray-900 to-gray-950 border border-gray-800 p-5 md:p-6 rounded-3xl shadow-xl relative overflow-hidden hidden sm:block">
+                        <div className="absolute -right-4 -top-4 opacity-5"><ShieldAlert size={80}/></div>
+                        <p className="text-gray-400 text-[10px] md:text-xs font-black uppercase tracking-widest mb-2 flex items-center justify-between relative z-10">Barrel Life <ShieldAlert size={14} className="text-gray-600 hidden md:block"/></p>
+                        <div className="flex items-baseline gap-1.5 md:gap-2 relative z-10"><span className={`text-4xl md:text-5xl font-black font-mono tracking-tight ${results?.barrelLife < 1200 ? 'text-red-500' : results?.barrelLife < 2500 ? 'text-yellow-500' : 'text-emerald-500'}`}>{results?.barrelLife?.toLocaleString() || '---'}</span><span className="text-gray-500 text-[10px] md:text-xs font-bold uppercase">Rounds</span></div>
+                      </div>
+                      
+                      <div className={`p-5 md:p-6 rounded-3xl shadow-xl transition-all duration-500 relative overflow-hidden hidden sm:block ${!isProTier ? 'bg-gray-950 border border-gray-800/50 opacity-80' : (results?.nodeQuality === 'Gold' ? 'border border-amber-500/50 bg-gradient-to-br from-amber-500/10 to-gray-900' : 'bg-gradient-to-br from-gray-900 to-gray-950 border border-gray-800')}`}>
+                        <div className="absolute -right-4 -top-4 opacity-5"><Target size={80}/></div>
+                        <p className="text-gray-400 text-[10px] md:text-xs font-black uppercase tracking-widest mb-2 flex items-center justify-between relative z-10">
+                          OBT Harmonics {isProTier && results?.nodeQuality === 'Gold' && <CheckCircle size={14} className="text-amber-500 hidden md:block"/>}
+                          {!isProTier && <Lock size={14} className="text-gray-600" />}
+                        </p>
+                        <div className="flex flex-col relative z-10">
+                          {isProTier ? (
+                            <>
+                              <div className={`text-lg md:text-2xl font-black uppercase flex items-center gap-2 ${results?.nodeQuality === 'Gold' ? 'text-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.5)]' : 'text-gray-200'}`}>
+                                 {!results?.nodeQuality && <Radio size={16} className="animate-pulse text-gray-600" />}
+                                 {results?.nodeQuality || 'Calculating...'}
+                              </div>
+                              <p className="text-[10px] md:text-xs text-gray-400 mt-1 font-mono">Exit: {results?.barrelTime}ms (N{results?.closestNodeId}: {results?.closestNode})</p>
+                            </>
+                          ) : (
+                            <>
+                              <div className="text-lg md:text-2xl font-black uppercase text-gray-600 flex items-center gap-2">PRO TIER</div>
+                              <p className="text-[10px] md:text-xs text-gray-700 mt-1 font-mono">Upgrade to unlock nodes</p>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Navigation Tabs */}
+                    <div className="flex border-b border-gray-800 overflow-x-auto hide-scrollbar mb-5 md:mb-8">
+                      {['simulation', 'harmonics', 'chamber', 'target ai'].map((tab) => {
+                        const isLockedTab = ['harmonics', 'chamber', 'target ai'].includes(tab);
+                        return (
+                          <button
+                            key={tab}
+                            onClick={() => setActiveTab(tab)}
+                            className={`px-5 md:px-8 py-3.5 md:py-4 text-[10px] md:text-xs font-black uppercase tracking-widest border-b-2 transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === tab ? 'border-orange-500 text-orange-400 bg-orange-500/5' : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-gray-800/30'}`}
+                          >
+                            {tab === 'harmonics' ? 'Harmonic Balance' : tab}
+                            {isLockedTab && !isProTier && <Lock size={12} className="text-gray-600" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Tab Content Panels */}
+                    <div className="bg-gray-900 border border-gray-800 rounded-3xl p-4 md:p-8 min-h-[500px] shadow-2xl relative">
+                      
+                      {/* PRO TIER CTA OVERLAY */}
+                      {isProTab && !isProTier ? (
+                         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 md:p-12 border-2 border-dashed border-orange-900/50 bg-orange-500/5 rounded-[2rem] min-h-[400px]">
+                            <Crown size={56} className="text-orange-500 mb-5" />
+                            <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tighter text-gray-200 mb-3">MTE Forge Pro Required</h3>
+                            <p className="text-xs md:text-sm text-gray-400 max-w-md leading-relaxed mb-8">
+                              You have reached a professional-tier feature. Upgrade to MTE Forge Pro ($19.99/mo) to unlock Optimal Barrel Time (OBT) node solvers, AB Doppler drag models, Chamber blueprinting, and AI vision diagnostics.
+                            </p>
+                            <button 
+                              onClick={() => setIsProTier(true)}
+                              className="bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-400 text-white px-10 py-4 rounded-xl font-black uppercase tracking-widest text-xs md:text-sm transition-all shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] flex items-center gap-2 active:scale-95"
+                            >
+                              <Zap size={16} /> Upgrade to Pro
+                            </button>
+                         </div>
+                      ) : (
+                        <>
+                          {/* TAB: SIMULATION */}
+                          {activeTab === 'simulation' && (
+                            <div className="space-y-6 md:space-y-8">
+                              <div className="flex flex-col md:flex-row md:justify-between md:items-center text-xs uppercase font-bold text-gray-400 border-b border-gray-800 pb-4 gap-3">
+                                <span className="flex items-center gap-2"><Disc size={14} className="text-orange-500" /> Thermodynamic Integration Engine</span>
+                                <div className="flex gap-2">
+                                  <button onClick={() => setSimView('travel')} className={`px-3 py-1.5 rounded-lg border transition-colors ${simView === 'travel' ? 'bg-orange-500/20 text-orange-400 border-orange-500/50 shadow-inner' : 'bg-transparent text-gray-500 border-gray-700 hover:text-gray-300'}`}>Internal Ballistics</button>
+                                  <button onClick={() => setSimView('ladder')} className={`px-3 py-1.5 rounded-lg border transition-colors ${simView === 'ladder' ? 'bg-orange-500/20 text-orange-400 border-orange-500/50 shadow-inner' : 'bg-transparent text-gray-500 border-gray-700 hover:text-gray-300'}`}>Powder Ladder</button>
+                                </div>
+                              </div>
+                              
+                              {/* Pressure Chart */}
+                              <div className="h-[300px] md:h-[400px] w-full -ml-3 md:ml-0">
+                                {simView === 'travel' ? (
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <ComposedChart data={results?.history} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                      <defs><linearGradient id="c" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f97316" stopOpacity={0.3}/><stop offset="95%" stopColor="#f97316" stopOpacity={0}/></linearGradient></defs>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+                                      <XAxis dataKey="travel" type="number" domain={['dataMin', 'dataMax']} stroke="#6b7280" tick={{fontSize: 10}} tickCount={8}>
+                                          <Label value="Bullet Travel (in)" position="insideBottom" offset={-10} fill="#4b5563" fontSize={11} />
+                                      </XAxis>
+                                      <YAxis yAxisId="pressureAxis" stroke="#f97316" tick={{fontSize: 10}} width={60}>
+                                          <Label value="Pressure (PSI)" angle={-90} position="insideLeft" fill="#f97316" fontSize={11} />
+                                      </YAxis>
+                                      <YAxis yAxisId="velocityAxis" orientation="right" stroke="#3b82f6" tick={{fontSize: 10}} width={60}>
+                                          <Label value="Velocity (FPS)" angle={90} position="insideRight" fill="#3b82f6" fontSize={11} />
+                                      </YAxis>
+                                      <YAxis yAxisId="percentAxis" orientation="right" domain={[0, 100]} hide={true} />
+                                      <Tooltip contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #1f2937', borderRadius: '12px', fontSize: '11px', padding: '10px' }} itemStyle={{ fontSize: '12px' }} />
+                                      <Area yAxisId="pressureAxis" type="monotone" dataKey="pressure" stroke="#f97316" strokeWidth={2.5} fill="url(#c)" name="Pressure (PSI)" activeDot={{ r: 5, fill: '#f97316' }} />
+                                      <Line yAxisId="velocityAxis" type="monotone" dataKey="velocity" stroke="#3b82f6" strokeWidth={2.5} dot={false} name="Velocity (FPS)" />
+                                      <Line yAxisId="percentAxis" type="monotone" dataKey="burnPercent" stroke="#10b981" strokeWidth={1.5} strokeDasharray="3 3" dot={false} name="Powder Burned (%)" />
+                                      {inputs.maxPressure && (
+                                          <ReferenceLine yAxisId="pressureAxis" y={inputs.maxPressure} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1.5}>
+                                              <Label value={`${inputs.pressureStandard} LIMIT`} fill="#ef4444" fontSize={10} position="insideTopLeft" />
+                                          </ReferenceLine>
+                                      )}
+                                    </ComposedChart>
+                                  </ResponsiveContainer>
+                                ) : (
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <ComposedChart data={results?.ladderData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+                                      <XAxis dataKey="charge" type="category" stroke="#6b7280" tick={{fontSize: 10}}>
+                                          <Label value="Powder Charge (gr)" position="insideBottom" offset={-10} fill="#4b5563" fontSize={11} />
+                                      </XAxis>
+                                      <YAxis yAxisId="pressureAxis" stroke="#f97316" tick={{fontSize: 10}} width={60} domain={['auto', 'auto']}>
+                                          <Label value="Peak Pressure (PSI)" angle={-90} position="insideLeft" fill="#f97316" fontSize={11} />
+                                      </YAxis>
+                                      <YAxis yAxisId="velocityAxis" orientation="right" stroke="#3b82f6" tick={{fontSize: 10}} width={60} domain={['auto', 'auto']}>
+                                          <Label value="Velocity (FPS)" angle={90} position="insideRight" fill="#3b82f6" fontSize={11} />
+                                      </YAxis>
+                                      <YAxis yAxisId="percentAxis" orientation="right" domain={[0, 100]} hide={true} />
+                                      <Tooltip contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #1f2937', borderRadius: '12px', fontSize: '11px', padding: '10px' }} itemStyle={{ fontSize: '12px' }} />
+                                      <Line yAxisId="pressureAxis" type="monotone" dataKey="pressure" stroke="#f97316" strokeWidth={2.5} name="Peak Pressure" activeDot={{ r: 6, fill: '#f97316' }} />
+                                      <Line yAxisId="velocityAxis" type="monotone" dataKey="velocity" stroke="#3b82f6" strokeWidth={2.5} name="Muzzle Velocity" activeDot={{ r: 6, fill: '#3b82f6' }} />
+                                      <Line yAxisId="percentAxis" type="monotone" dataKey="burnPercent" stroke="#10b981" strokeWidth={1.5} strokeDasharray="3 3" dot={false} name="Powder Burned (%)" />
+                                      {inputs.maxPressure && (
+                                          <ReferenceLine yAxisId="pressureAxis" y={inputs.maxPressure} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1.5}>
+                                              <Label value="MAX PSI" fill="#ef4444" fontSize={10} position="insideTopLeft" />
+                                          </ReferenceLine>
+                                      )}
+                                    </ComposedChart>
+                                  </ResponsiveContainer>
+                                )}
+                              </div>
+
+                              <div className="mt-8 pt-8 border-t border-gray-800">
+                                <div className="flex flex-col md:flex-row justify-between md:items-center mb-5 gap-4">
+                                   <h4 className="text-xs font-black uppercase tracking-widest text-gray-500 flex items-center gap-2"><Activity size={14}/> Thermodynamic Diagnostics</h4>
+                                   <button 
+                                     onClick={generateAIGunsmithReport}
+                                     disabled={isConsultingAI || !results}
+                                     className="w-full md:w-auto justify-center bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 border border-orange-500/30 px-4 py-2.5 rounded-xl text-[10px] md:text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2 shadow-sm"
+                                   >
+                                     {isConsultingAI ? <RefreshCw className="animate-spin" size={14}/> : <Sparkles size={14} className="text-orange-500" />}
+                                     {isConsultingAI ? "Analyzing..." : "AI Gunsmith Consult"}
+                                   </button>
+                                </div>
+
+                                {/* AI Gunsmith Report Output */}
+                                {aiGunsmithReport && (
+                                  <div className="mb-6 bg-gradient-to-br from-gray-900 to-gray-950 border border-orange-500/30 rounded-2xl p-5 md:p-6 shadow-xl relative overflow-hidden">
+                                     <div className="absolute top-0 right-0 p-4 opacity-5"><Sparkles size={80} className="text-orange-500" /></div>
+                                     <h5 className="text-[10px] md:text-xs font-black text-orange-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                       <Cpu size={16} /> AI Diagnostic Report
+                                     </h5>
+                                     <div className="text-xs md:text-sm text-gray-300 leading-relaxed font-mono space-y-4 relative z-10">
+                                       {aiGunsmithReport.split('\n\n').map((para, i) => (
+                                         <p key={i}>{para}</p>
+                                       ))}
+                                     </div>
+                                  </div>
+                                )}
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                                  <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Muzzle Pressure</span>
+                                    <span className="font-mono text-gray-200 text-sm md:text-base">{results?.muzzlePressure?.toLocaleString() || '---'} <span className="text-[10px] text-gray-600">PSI</span></span>
+                                  </div>
+                                  
+                                  <div className={`bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center ${results?.caseFill > 105 ? 'border-red-900/50 bg-red-900/10' : ''}`}>
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Case Fill Ratio</span>
+                                    <span className={`font-mono text-sm md:text-base font-bold ${results?.caseFill > 105 ? 'text-red-400' : results?.caseFill > 100 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                                      {results?.caseFill?.toFixed(1)}% {results?.caseFill > 100 && <span className="text-[10px] ml-1">(CMPR)</span>}
+                                    </span>
+                                  </div>
+
+                                  <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Usable Capacity</span>
+                                    <span className="font-mono text-gray-200 text-sm md:text-base">{results?.usableCaseVol?.toFixed(2) || '---'} <span className="text-[10px] text-gray-600">gr H2O</span></span>
+                                  </div>
+
+                                  <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Peak PSI Travel</span>
+                                    <span className="font-mono text-gray-200 text-sm md:text-base">{results?.peakPressurePos || '---'} <span className="text-[10px] text-gray-600">in</span></span>
+                                  </div>
+
+                                  <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Engraving Force</span>
+                                    <span className="font-mono text-gray-200 text-sm md:text-base">{inputs.bulletConstruction === 'Solid Copper' ? '1200' : inputs.bulletConstruction === 'Banded Solid' ? '800' : '400'} <span className="text-[10px] text-gray-600">Newtons</span></span>
+                                  </div>
+
+                                  <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Gas Inertia (Type)</span>
+                                    <span className="font-mono text-orange-400 text-sm md:text-base">{inputs.cartridgeType === 'Straight' ? '0.33' : '0.50'} <span className="text-[10px] text-gray-600 font-sans tracking-tight">Factor</span></span>
+                                  </div>
+                                  
+                                  <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center">
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">Explosion Heat</span>
+                                    <span className="font-mono text-gray-200 text-sm md:text-base">{inputs.heatOfExplosion} <span className="text-[10px] text-gray-600">kJ/kg</span></span>
+                                  </div>
+
+                                  <div className="bg-gray-900/60 p-4 rounded-2xl border border-gray-800 flex flex-col justify-center relative overflow-hidden">
+                                     {isProTier && radarData && <div className="absolute top-0 right-0 w-10 h-10 bg-emerald-500/20 rounded-bl-full flex items-center justify-center"><CheckCircle size={12} className="text-emerald-500 mb-3 ml-3"/></div>}
+                                    <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">AB Bullet Link</span>
+                                    {isProTier ? (
+                                      <span className={`text-sm md:text-base font-bold ${radarData ? 'text-emerald-400' : 'text-gray-600'}`}>{radarData ? 'SYNCED' : 'INACTIVE'}</span>
+                                    ) : (
+                                      <span className="text-gray-600 text-sm md:text-base font-bold flex items-center gap-1">LOCKED <Lock size={12}/></span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* TAB: HARMONICS */}
+                          {activeTab === 'harmonics' && isProTier && (
+                            <div className="h-full flex flex-col">
+                              <div className="mb-6 flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+                                <div>
+                                  <h3 className="text-xl md:text-2xl font-black uppercase tracking-tighter text-gray-200">OBT Harmonic Balance</h3>
+                                  <p className="text-xs text-gray-500 font-mono tracking-widest mt-1">Shockwave Node Mapping based on {inputs.barrelLength}" Barrel</p>
+                                </div>
+                                <div className={`bg-gray-900 border px-6 py-3 rounded-2xl self-start w-full md:w-auto text-center md:text-left ${results?.nodeQuality === 'Gold' ? 'border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.1)]' : 'border-gray-800'}`}>
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Current Exit Time</p>
+                                  <p className={`text-xl md:text-2xl font-black ${results?.nodeQuality === 'Gold' ? 'text-amber-500' : 'text-white'}`}>{results?.barrelTime} <span className="text-[10px] text-gray-500 uppercase font-bold">ms</span></p>
+                                </div>
+                              </div>
+
+                              <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 mt-2">
+                                 {/* Main Graph */}
+                                 <div className="lg:col-span-2 min-h-[300px] md:min-h-[400px] bg-gray-950/50 rounded-3xl border border-gray-800 p-3 md:p-6 relative shadow-inner">
+                                    <div className="absolute top-4 left-6 flex items-center gap-2 z-10">
+                                      <Activity size={14} className="text-red-500" />
+                                      <span className="text-[10px] md:text-xs uppercase tracking-widest font-bold text-gray-500">Barrel Stress Wave</span>
+                                    </div>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                      <ComposedChart data={results?.harmonicWaveData} margin={{ top: 50, right: 30, bottom: 20, left: 10 }}>
+                                         <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+                                         <XAxis dataKey="time" type="number" domain={['dataMin', 'dataMax']} stroke="#6b7280" tick={{fontSize: 10}} tickCount={6}>
+                                             <Label value="Barrel Transit Time (ms)" position="insideBottom" offset={-15} fill="#6b7280" fontSize={11} />
+                                         </XAxis>
+                                         <YAxis hide={true} domain={[0, 1.2]} />
+                                         <Tooltip contentStyle={{ backgroundColor: '#0a0a0a', border: '1px solid #1f2937', borderRadius: '12px', fontSize: '11px', padding: '10px' }} labelFormatter={(v) => `Time: ${v} ms`} formatter={(value) => [(value*100).toFixed(0) + '%', 'Barrel Stress']} />
+                                         
+                                         <Area type="monotone" dataKey="stress" stroke="#ef4444" strokeWidth={2} fill="#ef4444" fillOpacity={0.1} activeDot={false} />
+                                         
+                                         {results?.displayNodes?.map((node, index) => (
+                                           <ReferenceLine key={node.id} x={node.time} stroke={node.isError ? "#ef4444" : (node.isSquib ? "#eab308" : (node.isOverPressure ? "#ef4444" : "#10b981"))} strokeDasharray="3 3">
+                                               <Label 
+                                                  value={`N${node.id}: ${node.requiredChargeStr}`} 
+                                                  fill={node.isError ? "#ef4444" : (node.isSquib ? "#eab308" : (node.isOverPressure ? "#ef4444" : "#10b981"))} 
+                                                  fontSize={10} 
+                                                  position="top" 
+                                                  dy={index % 2 === 0 ? 0 : -20} 
+                                               />
+                                           </ReferenceLine>
+                                         ))}
+
+                                         <ReferenceLine x={parseFloat(results?.barrelTime)} stroke="#f97316" strokeWidth={2.5}>
+                                             <Label value="EXIT" fill="#f97316" fontSize={12} fontWeight="bold" position="insideTopLeft" />
+                                         </ReferenceLine>
+                                      </ComposedChart>
+                                    </ResponsiveContainer>
+                                 </div>
+                                 
+                                 {/* Node List Table */}
+                                 <div className="space-y-3 md:space-y-4 overflow-y-auto max-h-[400px] pr-2 hide-scrollbar">
+                                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                      <Target size={14} className="text-emerald-500"/> Node Deltas
+                                    </h4>
+                                    {results?.displayNodes?.map(node => {
+                                       const diff = parseFloat(results.barrelTime) - node.time;
+                                       const isClose = Math.abs(diff) <= 0.015;
+                                       const isError = node.requiredChargeStr === 'UNREACHABLE';
+                                       const isWarning = node.isOverPressure && !isError;
+                                       const isSquib = node.isSquib && !isError;
+                                       
+                                       return (
+                                          <div key={node.id} className={`p-4 rounded-2xl border grid grid-cols-3 items-center transition-colors shadow-sm ${isClose ? 'bg-amber-500/10 border-amber-500/30' : 'bg-gray-900 border-gray-800'}`}>
+                                             <div className="text-left">
+                                                <p className={`text-sm font-black uppercase ${isClose ? 'text-amber-500' : 'text-gray-300'}`}>Node {node.id}</p>
+                                                <p className="text-[10px] text-gray-500 font-mono mt-1">{node.time.toFixed(4)} ms</p>
+                                             </div>
+                                             <div className="text-center group relative cursor-help">
+                                                <p className={`text-sm font-bold font-mono flex items-center justify-center gap-1.5 ${isError ? 'text-red-500' : (isWarning ? 'text-red-400' : (isSquib ? 'text-yellow-500' : (isClose ? 'text-amber-400' : 'text-white')))}`}>
+                                                   {(isWarning || isSquib) && <AlertTriangle size={12} />}
+                                                   {node.requiredChargeStr}
+                                                </p>
+                                                <p className="text-[9px] text-gray-600 uppercase tracking-widest mt-1">Est. Charge</p>
+                                                {(isWarning || isSquib) && (
+                                                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-3 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl text-[11px] leading-relaxed text-gray-300 normal-case tracking-normal opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity z-[60]">
+                                                    {isWarning ? `Exceeds max pressure (${Math.round(node.psi).toLocaleString()} PSI)` : `Squib Risk: Low Pressure (${Math.round(node.psi).toLocaleString()} PSI)`}
+                                                  </div>
+                                                )}
+                                             </div>
+                                             <div className="text-right">
+                                                <p className={`text-sm font-bold font-mono ${isClose ? 'text-amber-400' : 'text-gray-400'}`}>{diff > 0 ? '+' : ''}{diff.toFixed(4)}</p>
+                                                <p className="text-[9px] text-gray-600 uppercase tracking-widest mt-1">Delta (ms)</p>
+                                             </div>
+                                          </div>
+                                       );
+                                    })}
+                                 </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* TAB: CHAMBER */}
+                          {activeTab === 'chamber' && isProTier && (
+                            <div className="flex flex-col h-full space-y-6 md:space-y-8">
+                              <div className="flex justify-between items-center text-xs uppercase font-bold text-gray-400 border-b border-gray-800 pb-4">
+                                <span className="flex items-center gap-2"><Ruler size={14} className="text-orange-500" /> Reamer & Chamber Dimensions</span>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 md:gap-8">
+                                <div className="bg-gray-800/30 p-6 md:p-8 rounded-3xl border border-gray-800 space-y-5 shadow-inner">
+                                  <h4 className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-800/50 pb-3 mb-5">Throat & Leade</h4>
+                                  <InputField label="Freebore Length" icon={Ruler} unit="in" step={0.001} value={inputs.freebore} onChange={(v) => setInputs({...inputs, freebore: v})} tooltip="Distance bullet travels before engaging rifling." />
+                                  <InputField label="Throat Angle" icon={Ruler} unit="deg" step={0.1} value={inputs.throatAngle} onChange={(v) => setInputs({...inputs, throatAngle: v})} tooltip="Angle of the leade engaging the bullet bearing surface." />
+                                </div>
+
+                                <div className="bg-gray-800/30 p-6 md:p-8 rounded-3xl border border-gray-800 space-y-5 shadow-inner">
+                                  <h4 className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-800/50 pb-3 mb-5">Neck & Shoulder</h4>
+                                  <InputField label="Neck Diameter" icon={Ruler} unit="in" step={0.001} value={inputs.neckDiameter} onChange={(v) => setInputs({...inputs, neckDiameter: v})} tooltip="Reamer neck diameter. Controls neck clearance." />
+                                  <InputField label="Shoulder Angle" icon={Ruler} unit="deg" step={0.1} value={inputs.shoulderAngle} onChange={(v) => setInputs({...inputs, shoulderAngle: v})} tooltip="Angle of the cartridge shoulder." />
+                                </div>
+
+                                <div className="bg-gray-800/30 p-6 md:p-8 rounded-3xl border border-gray-800 space-y-5 shadow-inner">
+                                  <h4 className="text-[10px] md:text-xs font-black text-gray-400 uppercase tracking-widest border-b border-gray-800/50 pb-3 mb-5">Base & Headspace</h4>
+                                  <InputField label="Headspace Datum" icon={Ruler} unit="in" step={0.001} value={inputs.headspace} onChange={(v) => setInputs({...inputs, headspace: v})} tooltip="Length from bolt face to shoulder datum." />
+                                  <InputField label="Base Diameter" icon={Ruler} unit="in" step={0.001} value={inputs.baseDiameter} onChange={(v) => setInputs({...inputs, baseDiameter: v})} tooltip="Diameter of the chamber near the web/base." />
+                                </div>
+                              </div>
+                              
+                              <div className="bg-gray-900 border border-gray-800 p-6 rounded-2xl flex items-start gap-5 shadow-lg">
+                                 <Info size={28} className="text-orange-500 shrink-0 mt-1" />
+                                 <p className="text-xs md:text-sm text-gray-400 leading-relaxed font-mono">
+                                   Chamber specifications control precision alignment and pressure curves. Tight freebore reduces bullet jump but can spike start-pressure. These blueprint values are currently tracked for your gunsmithing notes and will be integrated into the dynamic engraving friction model in a future thermodynamic update.
+                                 </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* TAB: TARGET AI */}
+                          {activeTab === 'target ai' && isProTier && (
+                            <div className="flex flex-col h-full space-y-6 md:space-y-8">
+                              <div className="flex justify-between items-center text-xs uppercase font-bold text-gray-400 border-b border-gray-800 pb-4">
+                                <span className="flex items-center gap-2"><Camera size={14} className="text-orange-500" /> MTE Vision Diagnostics</span>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-10">
+                                {/* Upload Section */}
+                                <div className="bg-gray-800/30 border-2 border-dashed border-gray-700 rounded-[2rem] p-6 lg:p-10 flex flex-col items-center justify-center text-center relative overflow-hidden min-h-[300px] lg:min-h-[400px]">
+                                  {targetImage ? (
+                                    <>
+                                      <img src={targetImage} alt="Target" className="absolute inset-0 w-full h-full object-cover opacity-30" />
+                                      <div className="z-10 bg-gray-950/80 p-6 lg:p-8 rounded-3xl border border-gray-800 backdrop-blur-md w-full max-w-sm shadow-2xl">
+                                         {isAnalyzing ? (
+                                           <div className="flex flex-col items-center gap-5 text-orange-400 py-6">
+                                             <ScanLine size={40} className="animate-bounce" />
+                                             <p className="text-[10px] lg:text-xs font-black uppercase tracking-widest animate-pulse">Running Neural Net...</p>
+                                           </div>
+                                         ) : targetResults ? (
+                                           <div className="flex flex-col items-center gap-4 lg:gap-5 text-emerald-400 py-4">
+                                             <CheckCircle size={40} />
+                                             <p className="text-[10px] lg:text-xs font-black uppercase tracking-widest">Analysis Complete</p>
+                                             <button onClick={() => {setTargetImage(null); setTargetFile(null); setTargetResults(null);}} className="mt-3 text-[10px] text-gray-400 hover:text-white underline uppercase tracking-widest">Upload New Target</button>
+                                           </div>
+                                         ) : (
+                                           <button 
+                                              onClick={analyzeTargetImage}
+                                              className="w-full bg-orange-600 hover:bg-orange-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs transition-all flex items-center justify-center gap-2 shadow-xl shadow-orange-900/20 active:scale-[0.98]"
+                                           >
+                                             <Sparkles size={18} /> AI Target Scan
+                                           </button>
+                                         )}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <UploadCloud size={48} lg:size={56} className="text-gray-600 mb-5" />
+                                      <h4 className="font-bold text-gray-400 mb-3 text-base">UPLOAD TARGET PHOTO</h4>
+                                      <p className="text-[10px] lg:text-xs text-gray-500 uppercase tracking-widest mb-8 leading-relaxed max-w-[200px]">Include reference coin or 1" grid</p>
+                                      <input 
+                                        type="file" accept="image/*" id="target-upload" className="hidden"
+                                        onChange={(e) => {
+                                          if (e.target.files && e.target.files[0]) {
+                                            setTargetFile(e.target.files[0]);
+                                            setTargetImage(URL.createObjectURL(e.target.files[0]));
+                                          }
+                                        }}
+                                      />
+                                      <label htmlFor="target-upload" className="bg-gray-800 hover:bg-gray-700 text-white px-8 py-4 rounded-xl font-bold uppercase tracking-widest text-xs cursor-pointer transition-all border border-gray-700 shadow-lg active:scale-95">
+                                        Select Image
+                                      </label>
+                                    </>
+                                  )}
+                                </div>
+
+                                {/* Results Section */}
+                                <div className="space-y-5 lg:space-y-8">
+                                  <div className="bg-gray-900 border border-gray-800 rounded-[2rem] p-6 lg:p-8 shadow-xl">
+                                    <h4 className="text-[10px] lg:text-xs font-black text-gray-400 uppercase tracking-widest mb-5">Dispersion Metrics</h4>
+                                    <div className="space-y-4 lg:space-y-5">
+                                      <div className="flex justify-between items-baseline border-b border-gray-800 pb-3">
+                                        <span className="text-xs text-gray-500 font-bold uppercase tracking-widest">Extreme Spread</span>
+                                        <span className="text-2xl lg:text-3xl font-black text-white">{targetResults ? targetResults.es : '---'}<span className="text-[10px] lg:text-xs text-orange-500 ml-2 font-bold tracking-widest">MOA</span></span>
+                                      </div>
+                                      <div className="flex justify-between items-baseline border-b border-gray-800 pb-3">
+                                        <span className="text-xs text-gray-500 font-bold uppercase tracking-widest">Mean Radius</span>
+                                        <span className="text-xl lg:text-2xl font-black text-white">{targetResults ? targetResults.mr : '---'}<span className="text-[10px] lg:text-xs text-orange-500 ml-2 font-bold tracking-widest">MOA</span></span>
+                                      </div>
+                                      <div className="flex justify-between items-baseline">
+                                        <span className="text-xs text-gray-500 font-bold uppercase tracking-widest">POI Offset</span>
+                                        <span className="text-base lg:text-xl font-mono text-gray-300">{targetResults ? targetResults.poi : '---'}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className={`border p-6 lg:p-8 rounded-[2rem] shadow-xl transition-colors duration-500 ${targetResults ? 'bg-orange-500/10 border-orange-500/30' : 'bg-gray-900 border-gray-800'}`}>
+                                    <h4 className="text-[10px] lg:text-xs font-black text-orange-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                      <Zap size={14} /> Harmonic Diagnosis
+                                    </h4>
+                                    <p className="text-sm lg:text-base text-gray-300 leading-relaxed font-mono">
+                                      {targetResults ? targetResults.diagnosis : "Awaiting target scan..."}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </main>
+            </div>
+          );
+        };
+
+        // ==========================================
+        // ORIGINAL REACT CODE ENDS HERE
+        // ==========================================
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
