@@ -7,15 +7,17 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <script src="https://unpkg.com/prop-types@15.7.2/prop-types.min.js"></script>
-    <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+    <script src="https://unpkg.com/react-is@18/umd/react-is.production.min.js"></script>
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
     
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+    
+    <script src="https://unpkg.com/lucide@0.469.0/dist/umd/lucide.min.js"></script>
 </head>
 <body class="bg-gray-950 text-white">
     <div id="root"></div>
@@ -27,18 +29,14 @@
           LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, AreaChart, Area, ScatterChart, Scatter, ZAxis, ComposedChart, Label 
         } = window.Recharts;
 
-        // Note: Lucide icons in a browser script tag work differently than in a Node environment. 
-        // We will create a simple wrapper component to render them.
+        // Custom Icon Wrapper
         const Icon = ({ name, size = 24, className = "" }) => {
             const iconRef = useRef(null);
             useEffect(() => {
                 if (iconRef.current && window.lucide) {
-                    // Find the icon string and convert to title case (e.g., alert-triangle to AlertTriangle)
-                    // The UMD build of Lucide attaches icons to window.lucide
-                    const iconName = name; 
-                    if(window.lucide.icons[iconName]){
+                    if(window.lucide.icons[name]){
                         iconRef.current.innerHTML = '';
-                        const svg = window.lucide.createElement(window.lucide.icons[iconName]);
+                        const svg = window.lucide.createElement(window.lucide.icons[name]);
                         svg.setAttribute('width', size);
                         svg.setAttribute('height', size);
                         svg.setAttribute('class', className);
@@ -110,7 +108,6 @@
         };
 
         // --- SHARED COMPONENTS ---
-        // MOBILE OPTIMIZATION: Increased vertical padding (py-2.5) for better thumb touch targets
         const InputField = ({ label, value, onChange, unit, step = 0.1, type = "number", tooltip, icon: IconComponent }) => (
           <div className="flex flex-col gap-1.5">
             <label className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center justify-between group relative cursor-help w-full">
